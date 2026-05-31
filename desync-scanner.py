@@ -12,7 +12,6 @@ import numpy as np
 import socket
 import socks
 import struct
-from urllib.parse import urlparse, urljoin
 from colorama import init, Fore, Style, Back
 import threading
 import hashlib
@@ -24,7 +23,19 @@ from collections import OrderedDict
 import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+import threading
+from collections import deque
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+import asyncio
+import aiohttp
+from dataclasses import dataclass
+from typing import List, Dict, Any
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode
+from aiohttp_socks import ProxyConnector
+import warnings
+import contextlib
 
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -33,11 +44,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 init(autoreset=True)
 
 # ============================================================================
-# TOR SESSION CLASS (Enhanced with Connection Pooling)
+# TOR SESSION CLASS 
 # ============================================================================
 
 class EliteTorSession:
-    """Elite Tor session with connection pooling and advanced reliability"""
+    """Tor session with connection pooling and advanced reliability"""
     
     def __init__(self, tor_proxy='127.0.0.1', tor_port=9050, timeout=30, pool_size=3):
         self.tor_proxy = tor_proxy
@@ -245,7 +256,7 @@ class EliteTorSession:
 
 
 # ============================================================================
-# PORT SWIGGER PAYLOADS (Complete Implementation)
+# PORT SWIGGER PAYLOADS
 # ============================================================================
 
 class PortSwiggerPayloads:
@@ -892,7 +903,7 @@ class EliteDESYNCScanner:
         # Add tracking headers
         test_id = f"test-{payload['id']}-{int(time.time())}"
         headers['X-Test-ID'] = test_id
-        headers['X-Scanner'] = 'DESYNC-Elite-v2.0'
+        headers['X-Scanner'] = 'DESYNC-SCAN-v1.0'
         
         result = {
             'payload_id': payload['id'],
@@ -2308,6 +2319,34 @@ class EliteDESYNCScanner:
         return result
     
     # ==================== MAIN SCAN ENGINE ====================
+    def scan_target(target, base_args, tor_session):
+        """
+        Isolated scan worker (IMPORTANT: no shared state)
+        """
+
+        try:
+            scanner = EliteDESYNCScanner(
+                tor_session=tor_session,
+                verbose=base_args.verbose,
+                delay=base_args.delay,
+                threads=base_args.threads,
+                enable_raw=not base_args.no_raw,
+                enable_validation=not base_args.no_validation
+            )
+
+            result = scanner.scan(target)
+            return {
+                "target": target,
+                "success": True,
+                "result": result
+            }
+
+        except Exception as e:
+            return {
+                "target": target,
+                "success": False,
+                "error": str(e)
+            }
     
     def scan(self, target_url):
         """Complete PortSwigger-style scan"""
@@ -2315,7 +2354,7 @@ class EliteDESYNCScanner:
         self.results['target'] = target_url
         self.results['tor_ip'] = self.tor.get_tor_ip()
         
-        self.log(f"Starting ELITE DESYNC scan on: {target_url}", "INFO", 0)
+        self.log(f"Starting DESYNC scan on: {target_url}", "INFO", 0)
         self.log(f"Scan ID: {self.results['scan_id']}", "DETAIL", 1)
         self.log(f"Tor exit: {self.results['tor_ip']}", "DETAIL", 1)
         
@@ -2447,8 +2486,8 @@ class EliteDESYNCScanner:
         report = self.results.copy()
         
         # Add metadata
-        report['scanner_version'] = 'DESYNC-Elite-v2.0-PortSwigger'
-        report['methodology'] = 'Complete PortSwigger HTTP Desync Research'
+        report['scanner_version'] = 'DESYNC-SCAN-v1'
+        report['methodology'] = 'Complete HTTP Desync Research'
         
         # Format for output
         if output_file:
@@ -2496,23 +2535,23 @@ def load_targets(file_path):
 def print_elite_banner():
     """Print elite banner"""
     banner = f"""{Fore.CYAN}{Style.BRIGHT}
-╔══════════════════════════════════════════════════════════════════════════╗
+╔══════════════════════════════════════════════════════════════════════════ ╗
 ║   ██████╗ ███████╗███████╗██╗   ██╗███╗   ██╗ ██████╗    ██████╗ ███████╗ ║
 ║   ██╔══██╗██╔════╝██╔════╝╚██╗ ██╔╝████╗  ██║██╔════╝    ██╔══██╗██╔════╝ ║
 ║   ██║  ██║█████╗  ███████╗ ╚████╔╝ ██╔██╗ ██║██║  ███╗   ██████╔╝█████╗   ║
 ║   ██║  ██║██╔══╝  ╚════██║  ╚██╔╝  ██║╚██╗██║██║   ██║   ██╔══██╗██╔══╝   ║
 ║   ██████╔╝███████╗███████║   ██║   ██║ ╚████║╚██████╔╝   ██║  ██║███████╗ ║
 ║   ╚═════╝ ╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═══╝ ╚═════╝    ╚═╝  ╚═╝╚══════╝ ║
-║                                                                          ║
-║                       DESYNC-HTTP SMUGGLING SCANNER.                     ║
-║                  Complete PortSwigger Methodology Implementation         ║
-║                           For Authorized Research Only                  ║
-╚══════════════════════════════════════════════════════════════════════════╝
+║                                                                           ║
+║                       DESYNC-HTTP SMUGGLING SCANNER.                      ║
+║                                                                           ║
+║                        For Authorized Research Only                       ║
+╚══════════════════════════════════════════════════════════════════════════ ╝
 {Style.RESET_ALL}"""
     print(banner)
 
 def print_summary(scanner):
-    """Print professional summary"""
+    """Print summary"""
     results = scanner.results
     
     print(f"\n{Fore.CYAN}{'='*70}")
@@ -2565,12 +2604,279 @@ def print_summary(scanner):
                 print(f"    Indicators: {', '.join(detection['analysis']['key_indicators'][:3])}")
     
     print(f"\n{Fore.GREEN}[+] Scan completed successfully!")
-    print(f"[+] Scanner: DESYNC-Elite-v2.0")
+    print(f"[+] Scanner: DESYNC-SCAN-v1.0")
+
+
+def print_async_summary(all_results):
+    print("\n" + "="*70)
+    print("ASYNC SCAN COMPLETE")
+    print("="*70)
+
+    total = len(all_results)
+    success = len([r for r in all_results if r["success"]])
+
+    print(f"[+] Total targets: {total}")
+    print(f"[+] Successful: {success}")
+    print(f"[+] Failed: {total - success}")
+
+
+
+# ASYNC WORKER ENGINE 
+
+class AsyncScanEngine:
+    """
+    Async worker pool
+    """
+
+    def __init__(self, scanner_class, tor_session, args):
+        self.scanner_class = scanner_class
+        self.tor_session = tor_session
+        self.args = args
+
+        self.semaphore = asyncio.Semaphore(args.threads)
+        self.results = []
+        self.lock = asyncio.Lock()
+
+        # tracking
+        self.completed = 0
+        self.failed = 0
+
+        # safety: prevent stuck scans
+        self.scan_timeout = getattr(args, "timeout", 60)
+
+    # ================================
+    # MAIN ENTRY
+    # ================================
+    async def run_scan(self, targets: List[str]):
+        """
+        Main async entry point
+        """
+
+        print(f"\n[+] Async engine started with {self.args.threads} workers\n")
+
+        tasks = [
+            asyncio.create_task(self.worker(t))
+            for t in targets
+        ]
+
+        await asyncio.gather(*tasks)
+
+        return self.results
+
+    # ================================
+    # WORKER
+    # ================================
+    async def worker(self, target: str):
+        """
+        Single isolated scan worker
+        """
+
+        async with self.semaphore:
+            start = time.time()
+
+            try:
+                # TIMEOUT WRAPPER (IMPORTANT FIX)
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(self._run_sync_scan, target),
+                    timeout=self.scan_timeout
+                )
+
+                duration = round(time.time() - start, 2)
+
+                record = {
+                    "target": target,
+                    "success": True,
+                    "duration": duration,
+                    "result": result
+                }
+
+                async with self.lock:
+                    self.results.append(record)
+                    self.completed += 1
+
+                print(f"[✓] {target} ({duration}s)")
+
+            except Exception as e:
+                duration = round(time.time() - start, 2)
+
+                record = {
+                    "target": target,
+                    "success": False,
+                    "error": str(e)
+                }
+
+                async with self.lock:
+                    self.results.append(record)
+                    self.failed += 1
+
+                print(f"[!] {target} FAILED → {e}")
+
+    # ================================
+    # SYNC BRIDGE
+    # ================================
+    def _run_sync_scan(self, target):
+        """
+        Bridge async → blocking scanner
+        """
+
+        scanner = self.scanner_class(
+            tor_session=self.tor_session,
+            verbose=self.args.verbose,
+            delay=self.args.delay,
+            threads=1,
+            enable_raw=not self.args.no_raw,
+            enable_validation=not self.args.no_validation
+        )
+
+        return scanner.scan(target)
+
+# CRAWLER
+class AsyncCrawler:
+    """
+    Async endpoint discovery engine
+    """
+
+    def __init__(self, base_url, max_depth=2, concurrency=20):
+        self.proxy = "socks5://127.0.0.1:9050"
+        self.base_url = base_url
+        self.max_depth = max_depth
+        self.semaphore = asyncio.Semaphore(concurrency)
+
+        self.visited = set()
+        self.found = set()
+        self.domain = urlparse(base_url).netloc
+
+    async def crawl(self):
+        connector = ProxyConnector.from_url(self.proxy)
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=20),
+            headers={"User-Agent": "DESYNC-Crawler/1.0"}
+        ) as session:
+
+            await self._crawl(session, self.base_url, 0)
+
+        return list(self.found)
+
+    async def _crawl(self, session, url, depth):
+        if depth > self.max_depth or url in self.visited:
+            return
+
+        self.visited.add(url)
+
+        try:
+            async with self.semaphore:
+                async with session.get(url, allow_redirects=True, timeout=15) as resp:
+
+                    if resp.status != 200:
+                        return
+
+                    content_type = resp.headers.get("Content-Type", "").lower()
+
+                    if any(x in content_type for x in [
+                        "image", "png", "jpg", "jpeg", "gif", "ico",
+                        "video", "audio", "octet-stream", "zip", "pdf", "font"
+                    ]):
+                        return
+
+                    try:
+                        html = await resp.text(errors="ignore")
+                    except:
+                        raw = await resp.read()
+                        html = raw.decode("utf-8", errors="ignore")
+
+        except Exception as e:
+            print(f"[crawler-error] {url} → {e}")
+            return
+
+        self.found.add(url)
+
+        warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+        try:
+            soup = BeautifulSoup(html, "lxml")
+        except:
+            soup = BeautifulSoup(html, "html.parser")
+
+
+        # =========================
+        # LINKS
+        # =========================
+        for a in soup.find_all("a", href=True):
+            link = urljoin(url, a["href"])
+
+            if urlparse(link).netloc == self.domain:
+                await self._crawl(session, link, depth + 1)
+
+        # =========================
+        # FORMS (HIGH VALUE DESYNC TARGETS)
+        # =========================
+        for form in soup.find_all("form"):
+            action = form.get("action")
+            method = (form.get("method") or "get").lower()
+
+            if action:
+                endpoint = urljoin(url, action)
+
+                if urlparse(endpoint).netloc == self.domain:
+                    self.found.add(endpoint)
+
+                    if method == "post":
+                        self.found.add(endpoint)
+                        self.found.add(endpoint + "?")
+                        self.found.add(endpoint + "?test=1")
+
+        # =========================
+        # PARAMETER HANDLING
+        # =========================
+        parsed = urlparse(url)
+
+        if parsed.query:
+            base = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            self.found.add(base)
+            self.found.add(url)
+
+        # =========================
+        # DESYNC SURFACE GENERATION
+        # =========================
+        self.found.add(url + "?")
+        self.found.add(url + "/")
+        self.found.add(url + "?test=1")
+
+    def _process_link(self, session, link, depth):
+        parsed = urlparse(link)
+
+        if parsed.netloc and parsed.netloc != self.domain:
+            return
+
+        # normalize (strip fragments)
+        link = link.split("#")[0]
+
+        #await self._crawl(session, link, depth + 1)
+
+
+    async def _schedule(self, session, link, depth):
+        """
+        Safe async recursion controller (prevents task explosion)
+        """
+        await self._crawl(session, link, depth)
+
+    def _is_valid(self, url):
+        try:
+            parsed = urlparse(url)
+
+            return (
+                parsed.scheme in ("http", "https") and
+                parsed.netloc == self.domain and
+                url not in self.visited
+            )
+        except:
+            return False
 
 def main():
     """Main execution"""
     parser = argparse.ArgumentParser(
-        description="DESYNC-HTTP Smuggling Scanner v2.0 - Complete PortSwigger Implementation",
+        description="DESYNC-HTTP Smuggling Scanner v1.0",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""{Fore.CYAN}
 Examples:
@@ -2578,6 +2884,7 @@ Examples:
   {sys.argv[0]} -u https://example.com -v --delay 1.5 --threads 5
   {sys.argv[0]} -u http://target.onion -o report.json --no-validation
   {sys.argv[0]} -u http://target.onion --tor-port 9150 --timeout 45
+  {sys.argv[0]} -u http://target.onion --crawl --depth 4 -v --threads 10
   {sys.argv[0]} --targets targets.txt --tor-port 9150 --timeout 45 --threads 7
 
         
@@ -2613,22 +2920,25 @@ Examples:
                        help='Tor proxy port (default: 9050)')
     parser.add_argument('--no-tor-check', action='store_true',
                        help='Skip Tor connection test (not recommended)')
+    parser.add_argument('--crawl', action='store_true',
+                    help='Enable crawler before scanning')
+    parser.add_argument('--depth', type=int, default=2,
+                    help='Crawler depth (default: 2)')
     
     args = parser.parse_args()
 
-    # Validate input mode
+   # ---------------- VALIDATION ----------------
     if not args.url and not args.targets:
-        print("[-] Error: You must provide either --url or --targets")
+        print("[-] Error: provide --url or --targets")
         sys.exit(1)
 
     if args.url and args.targets:
-        print("[-] Error: Use either --url OR --targets, not both")
+        print("[-] Error: use only one mode")
         sys.exit(1)
-    
-    # Print banner
+
     print_elite_banner()
-    
-    # Initialize Tor session
+
+    # ---------------- TOR ----------------
     try:
         tor_session = EliteTorSession(
             tor_proxy=args.tor_host,
@@ -2636,68 +2946,103 @@ Examples:
             timeout=args.timeout,
             pool_size=args.threads
         )
-        
+
         if not args.no_tor_check:
             if not tor_session.test_tor_connection():
-                print(f"{Fore.RED}[-] Tor connection failed. Exiting.")
+                print("[-] Tor connection failed")
                 sys.exit(1)
-        else:
-            print(f"{Fore.YELLOW}[!] Skipping Tor connection test")
-            
+
     except Exception as e:
-        print(f"{Fore.RED}[-] Failed to initialize Tor: {e}")
+        print(f"[-] Tor init failed: {e}")
         sys.exit(1)
-    
-    # Initialize scanner
-    scanner = EliteDESYNCScanner(
-        tor_session=tor_session,
-        verbose=args.verbose,
-        delay=args.delay,
-        threads=args.threads,
-        enable_raw=not args.no_raw,
-        enable_validation=not args.no_validation
-    )
-    
-    # Run scan
+
+
+    # ---------------- RUN ASYNC PIPELINE ----------------
     try:
-        all_results = []
+        asyncio.run(async_main(args, tor_session))
 
-        if args.targets:
-            targets = load_targets(args.targets)
-
-            print(f"\n[+] Loaded {len(targets)} targets from file\n")
-
-            for i, target in enumerate(targets, 1):
-                print(f"\n{'='*70}")
-                print(f"[TARGET {i}/{len(targets)}] {target}")
-                print(f"{'='*70}\n")
-
-                try:
-                    result = scanner.scan(target)
-                    all_results.append(result)
-
-                except Exception as e:
-                    print(f"[!] Scan failed for {target}: {e}")
-                    continue
-
-        else:
-            result = scanner.scan(args.url)
-            all_results.append(result)
-
-        
-        # Print summary
-        print_summary(scanner)
-        
-        # Save report
-        if args.output:
-            scanner.generate_report(args.output)
-        
     except KeyboardInterrupt:
-        print(f"\n{Fore.YELLOW}[!] Scan interrupted by user")
+        print("\n[!] Scan interrupted by user")
         sys.exit(0)
+
     except Exception as e:
-        print(f"\n{Fore.RED}[-] Scan failed: {e}")
+        print(f"\n[-] Fatal error: {e}")
         sys.exit(1)
+
+
+async def async_main(args, tor_session):
+    import json
+
+    # ---------------- BUILD BASE TARGET LIST ----------------
+    if args.targets:
+        targets = load_targets(args.targets)
+    else:
+        targets = [args.url]
+
+    # ---------------- CRAWL PHASE ----------------
+    if args.crawl:
+        print(f"\n[+] Crawling {args.url} (depth={args.depth})...\n")
+
+        crawler = AsyncCrawler(
+            args.url,
+            max_depth=args.depth,
+            concurrency=20
+        )
+
+        crawled = await crawler.crawl()
+
+        print(f"[+] Crawled endpoints: {len(crawled)}")
+
+        targets = list(set(targets + crawled))
+
+    # ---------------- CLEAN TARGETS ----------------
+    targets = [t for t in targets if t and isinstance(t, str)]
+
+    print(f"\n[+] Final target count: {len(targets)}\n")
+
+    if not targets:
+        print("[-] No targets found")
+        return
+
+    # ---------------- ENGINE ----------------
+    print(f"[+] Starting ASYNC scan on {len(targets)} targets...\n")
+
+    engine = AsyncScanEngine(
+        EliteDESYNCScanner,
+        tor_session,
+        args
+    )
+
+    results = await engine.run_scan(targets)
+
+    # ---------------- SUMMARY ----------------
+    successful = [r for r in results if r.get("success")]
+    failed = [r for r in results if not r.get("success")]
+
+    print("\n" + "=" * 60)
+    print("SCAN COMPLETE")
+    print("=" * 60)
+
+    print(f"[+] Total: {len(results)}")
+    print(f"[+] Success: {len(successful)}")
+    print(f"[+] Failed: {len(failed)}")
+
+    # ---------------- SAVE ----------------
+    if args.output:
+        report = {
+            "summary": {
+                "total": len(results),
+                "success": len(successful),
+                "failed": len(failed)
+            },
+            "results": results
+        }
+
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, default=str)
+
+        print(f"[+] Report saved → {args.output}")
+
 
 if __name__ == "__main__":
     main()
