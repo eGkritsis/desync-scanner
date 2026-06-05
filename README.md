@@ -1,31 +1,31 @@
-DESYNC-HTTP Scanner - Complete Documentation
-═══════════════════════════════════════════════════════════════════════════════
+# DESYNC-HTTP Scanner - Complete Documentation
 
 PROJECT: Academic HTTP Request Smuggling Detection
 STATUS: Production Ready
 LICENSE: Research Use Only
 
-═══════════════════════════════════════════════════════════════════════════════
-QUICK START
-═══════════════════════════════════════════════════════════════════════════════
+## QUICK START
 
 # Single target (local lab)
+```bash
 python3 desyn-scanner.py -u http://localhost:8080 --no-tor
+```
 
 # Single target with Tor
+```bash
 python3 desyn-scanner.py -u http://target.local
+```
 
 # Batch scanning with file
-for target in $(cat targets.txt); do
-  python3 desyn-scanner.py -u "$target" --no-tor
-done
-
+```bash
+  python3 desyn-scanner.py --target target.txt
+```
 # Save results
+```bash
 python3 desyn-scanner.py -u http://localhost:8080 --no-tor -o results.json
+```
 
-═══════════════════════════════════════════════════════════════════════════════
-FULL CLI REFERENCE
-═══════════════════════════════════════════════════════════════════════════════
+## FULL CLI REFERENCE
 
 Required Arguments:
   -u, --url URL                   Target URL (e.g., http://target:8080)
@@ -40,24 +40,23 @@ Optional Arguments:
   -o, --output FILE               Save JSON results to file
   -h, --help                      Show help message
 
-═══════════════════════════════════════════════════════════════════════════════
-DETECTION TECHNIQUES IMPLEMENTED (v7)
-═══════════════════════════════════════════════════════════════════════════════
 
-✓ 1. CL.TE (Content-Length vs Transfer-Encoding)
+## DETECTION TECHNIQUES IMPLEMENTED (v7)
+
+**✓ 1. CL.TE (Content-Length vs Transfer-Encoding)**
     - Basic: Frontend sees CL, Backend sees TE
     - With chunk extensions (0;x=y)
     - Methodology: Send CL too short, expect TIMEOUT on backend
     - Confirmation: Send correct CL, expect 200 OK
 
-✓ 2. TE.CL (Transfer-Encoding vs Content-Length)
+**✓ 2. TE.CL (Transfer-Encoding vs Content-Length)**
     - Basic: Frontend sees TE, Backend sees CL
     - Space obfuscation (chunked + space)
     - Tab obfuscation (chunked + tab)
     - Methodology: Add extra data after chunked terminator
     - Confirmation: Correct payload returns 200 OK
 
-✓ 3. TE.TE (Transfer-Encoding Obfuscation)
+**✓ 3. TE.TE (Transfer-Encoding Obfuscation)**
     - Case mutations (transfer-encoding vs Transfer-Encoding)
     - Space before value (TE:  chunked)
     - Identity + chunked combinations
@@ -65,46 +64,45 @@ DETECTION TECHNIQUES IMPLEMENTED (v7)
     - Methodology: Both parsers see TE but interpret differently
     - Result: Can cause desync when parsers disagree on encoding
 
-✓ 4. CL.CL (Duplicate Content-Length)
+**✓ 4. CL.CL (Duplicate Content-Length)**
     - Two Content-Length headers with conflicting values
     - Server picks first vs. last
     - Methodology: Frontend uses value 1, Backend uses value 2
     - Result: Body length mismatch causes desync
 
-✓ 5. Chunk Size Variants (TERM.EXT, EXT.TERM, ONE.TWO, TWO.ONE)
+**✓ 5. Chunk Size Variants (TERM.EXT, EXT.TERM, ONE.TWO, TWO.ONE)**
     - Line terminator parsing in chunk extensions/bodies
     - Different length calculations
     - Newline vs CRLF handling
     - Methodology: Exploit difference in how parsers count bytes
     - Result: Frontend reads less data than backend expects
 
-✓ 6. Hidden Headers (Parser Discrepancies)
+**✓ 6. Hidden Headers (Parser Discrepancies)**
     - Space before colon (Content-Length : 0)
     - Line wrapping in headers (Content-Length:\r\n 0)
     - Tab in header names
     - Methodology: Hide headers from one parser but not the other
     - Result: Different content forwarding
 
-✓ 7. Smuggled Requests (Cache Poisoning)
+**✓ 7. Smuggled Requests (Cache Poisoning)**
     - Inject crafted request into next request's body
     - Detect via response reflection or status codes
     - Methodology: Smuggle admin request
     - Result: Cache/application confusion
 
-✓ 8. Client-Side Desync (Browser attacks)
+**✓ 8. Client-Side Desync (Browser attacks)**
     - Connection state attacks
     - Pause-based desync
     - Methodology: Single request split into two responses
     - Result: Browser handles malformed response
 
-✓ 9. HTTP/2 Variants
+**✓ 9. HTTP/2 Variants**
     - H2.TE: HTTP/2 request with TE header to HTTP/1.1 backend
     - H2.CL: Content-Length confusion in HTTP/2
     - Methodology: Leverage protocol version mismatch
 
-═══════════════════════════════════════════════════════════════════════════════
-DETECTION METHODOLOGY
-═══════════════════════════════════════════════════════════════════════════════
+
+## DETECTION METHODOLOGY
 
 For each technique, scanner performs:
 
@@ -128,9 +126,8 @@ PHASE 4: VALIDATION (Control Test)
   → Expected on all servers: 200 OK
   → Confirms vulnerability is specific to malformed payload
 
-═══════════════════════════════════════════════════════════════════════════════
-INTERPRETING RESULTS
-═══════════════════════════════════════════════════════════════════════════════
+
+## INTERPRETING RESULTS
 
 CONFIRMED VULNERABILITIES:
   Output shows:
@@ -159,12 +156,12 @@ NOT VULNERABLE:
     - Server treats both as valid
     - Likely uses compatible parsers
 
-═══════════════════════════════════════════════════════════════════════════════
-EXAMPLE USAGE
-═══════════════════════════════════════════════════════════════════════════════
 
-SCENARIO 1: Local Lab Testing
-───────────────────────────────────────────────────────────────────────────────
+## EXAMPLE USAGE
+
+**SCENARIO 1: Local Lab Testing**
+
+```bash
 $ python3 desyn-scanner.py -u http://localhost:8080 --no-tor
 
 [*] Direct mode (no Tor)
@@ -197,10 +194,11 @@ Exploitation recommendations:
   2. Test cache poisoning via request reflection
   3. Attempt to access restricted resources (/admin)
   4. Document affected CDN/WAF/Framework
+```
 
+**SCENARIO 2: Tor-Routed Scanning (Authorized)**
 
-SCENARIO 2: Tor-Routed Scanning (Authorized)
-───────────────────────────────────────────────────────────────────────────────
+```bash
 $ python3 desyn-scanner.py -u http://target.local --delay 2.0
 
 [*] Tor connected
@@ -226,14 +224,15 @@ $ cat results_target1.json
   "confirmed": ["CL.TE-basic"],
   "payloads_tested": 45
 }
+```
 
-═══════════════════════════════════════════════════════════════════════════════
-PAYLOAD REFERENCE
-═══════════════════════════════════════════════════════════════════════════════
+## PAYLOAD REFERENCE
 
-CL.TE BASIC:
-────────────
-Attack (CL too short):
+### CL.TE BASIC:
+
+**Attack (CL too short):**
+
+```bash
   POST / HTTP/1.1\r\n
   Host: target\r\n
   Content-Length: 4\r\n
@@ -241,8 +240,9 @@ Attack (CL too short):
   Connection: keep-alive\r\n
   \r\n
   1\r\nZ\r\n0\r\n\r\n
-
-Normal (CL correct):
+```
+**Normal (CL correct):**
+```bash
   POST / HTTP/1.1\r\n
   Host: target\r\n
   Content-Length: 11\r\n
@@ -250,16 +250,18 @@ Normal (CL correct):
   Connection: keep-alive\r\n
   \r\n
   1\r\nZ\r\n0\r\n\r\n
+```
 
-Why it works:
+**Why it works:**
   - Frontend (with CL priority) reads first 4 bytes of body: "1\r\nZ"
   - Backend (with TE priority) reads chunked: 1 byte "Z", then final chunk "0"
   - Frontend sends only "1\r\nZ", backend waits for rest of chunked data
   - Timeout occurs because backend is waiting for final chunk marker
 
 
-TE.CL BASIC:
-────────────
+### TE.CL BASIC:
+
+```bash 
 Attack (CL mismatches):
   POST / HTTP/1.1\r\n
   Host: target\r\n
@@ -277,20 +279,21 @@ Normal (CL correct):
   Connection: keep-alive\r\n
   \r\n
   0\r\n\r\n
+```
 
-Why it works:
+**Why it works:**
   - Frontend (TE priority) reads chunked: "0" = final chunk, stops
   - Backend (CL priority) expects 6 bytes but gets 5
   - Backend waits for 6th byte "X" that was never sent in complete form
   - Timeout occurs on backend
 
 
-═══════════════════════════════════════════════════════════════════════════════
-TROUBLESHOOTING
-═══════════════════════════════════════════════════════════════════════════════
 
-ISSUE: "Tor failed, falling back to direct mode"
-───────────────────────────────────────────────────────────────────────────────
+## TROUBLESHOOTING
+
+
+**ISSUE: "Tor failed, falling back to direct mode"**
+
 CAUSE: Tor service not running or not accessible
 FIX:
   $ torctl start        # Start Tor service
@@ -299,55 +302,61 @@ FIX:
 Or just use --no-tor for local testing
 
 
-ISSUE: "Connection died - no client-side desync"
-───────────────────────────────────────────────────────────────────────────────
+**ISSUE: "Connection died - no client-side desync"**
+
 CAUSE: Server closes connection after attack
 MEANING: Server is actively rejecting malformed requests
 FIX: Not an issue - server is defending correctly
 
 
-ISSUE: All payloads return 200 OK
-───────────────────────────────────────────────────────────────────────────────
+**ISSUE: All payloads return 200 OK**
+
 CAUSE: Server may use compatible parsers or have mitigations
 MEANING: Likely NOT vulnerable
 VERIFY: Try with different delay: --delay 0.5 or --delay 2.0
 
 
-ISSUE: Random timeout on normal request
-───────────────────────────────────────────────────────────────────────────────
+**ISSUE: Random timeout on normal request**
+
 CAUSE: Network instability or server slowness
 FIX: Increase timeout: --timeout 15.0
 HINT: If only happening on specific payloads, server may be vulnerable
 
 
-═══════════════════════════════════════════════════════════════════════════════
-ADVANCED CONFIGURATION
-═══════════════════════════════════════════════════════════════════════════════
 
-FINE-TUNING FOR DIFFERENT TARGETS:
+## ADVANCED CONFIGURATION
+
+
+**FINE-TUNING FOR DIFFERENT TARGETS:**
 
 Slow CDN (Cloudflare, Akamai):
-  $ python3 desyn-scanner.py -u http://target.com --delay 3.0 --timeout 15.0
+```bash
+python3 desyn-scanner.py -u http://target.com --delay 3.0 --timeout 15.0
+```
 
 Fast internal network:
-  $ python3 desyn-scanner.py -u http://internal:8080 --no-tor --delay 0.5
+```bash
+python3 desyn-scanner.py -u http://internal:8080 --no-tor --delay 0.5
+```
 
 High-latency (Tor or satellite):
-  $ python3 desyn-scanner.py -u http://target --delay 5.0 --timeout 30.0 --tor-port 9050
+```bash
+python3 desyn-scanner.py -u http://target --delay 5.0 --timeout 30.0 --tor-port 9050
+```
 
 WAF-protected target:
-  $ python3 desyn-scanner.py -u http://target --delay 2.0 --verbose
+```bash
+python3 desyn-scanner.py -u http://target --delay 2.0 --verbose
+```
 
-═══════════════════════════════════════════════════════════════════════════════
-LEGAL CONSIDERATIONS
-═══════════════════════════════════════════════════════════════════════════════
+## LEGAL CONSIDERATIONS
 
-RISK DISCLAIMER:
+### RISK DISCLAIMER:
   This tool sends crafted HTTP requests that may:
   - Cause temporary unresponsiveness
   - Trigger WAF/IDS alerts
   - Generate security logs
   - Be detected as attack attempts
   
-  Use only in authorized environments with network owner permission.
+  **Use only in authorized environments with network owner permission.**
 
