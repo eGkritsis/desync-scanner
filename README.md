@@ -6,21 +6,21 @@ LICENSE: Research Use Only
 
 ## QUICK START
 
-# Single target (local lab)
+### Single target (local lab)
 ```bash
 python3 desyn-scanner.py -u http://localhost:8080 --no-tor
 ```
 
-# Single target with Tor
+### Single target with Tor
 ```bash
 python3 desyn-scanner.py -u http://target.local
 ```
 
-# Batch scanning with file
+### Batch scanning with file
 ```bash
   python3 desyn-scanner.py --target target.txt
 ```
-# Save results
+### Save results
 ```bash
 python3 desyn-scanner.py -u http://localhost:8080 --no-tor -o results.json
 ```
