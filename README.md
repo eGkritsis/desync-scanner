@@ -1,8 +1,8 @@
 # DESYNC-HTTP Scanner - Complete Documentation
 
-PROJECT: Academic HTTP Request Smuggling Detection
-STATUS: Production Ready
-LICENSE: Research Use Only
+- PROJECT: HTTP Request Smuggling Detection
+- STATUS: Production Ready
+- LICENSE: Research Use Only
 
 ## QUICK START
 
