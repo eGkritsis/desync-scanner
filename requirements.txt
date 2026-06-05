@@ -1,7 +1,1 @@
 requests
-aiohttp
-beautifulsoup4
-tqdm
-colorama
-pysocks
-requests[socks]
