@@ -1,26 +1,26 @@
 # DESYNC-HTTP Scanner - Complete Documentation
 
-PROJECT: Academic HTTP Request Smuggling Detection
-STATUS: Production Ready
-LICENSE: Research Use Only
+- PROJECT: HTTP Request Smuggling Detection
+- STATUS: Production Ready
+- LICENSE: Research Use Only
 
 ## QUICK START
 
-# Single target (local lab)
+### Single target (local lab)
 ```bash
 python3 desyn-scanner.py -u http://localhost:8080 --no-tor
 ```
 
-# Single target with Tor
+### Single target with Tor
 ```bash
 python3 desyn-scanner.py -u http://target.local
 ```
 
-# Batch scanning with file
+### Batch scanning with file
 ```bash
   python3 desyn-scanner.py --target target.txt
 ```
-# Save results
+### Save results
 ```bash
 python3 desyn-scanner.py -u http://localhost:8080 --no-tor -o results.json
 ```
@@ -28,9 +28,12 @@ python3 desyn-scanner.py -u http://localhost:8080 --no-tor -o results.json
 ## FULL CLI REFERENCE
 
 Required Arguments:
+```bash
   -u, --url URL                   Target URL (e.g., http://target:8080)
+```
 
 Optional Arguments:
+  ```bash
   --no-tor                        Use direct connection instead of Tor
   --tor-host HOST                 Tor SOCKS5 host (default: 127.0.0.1)
   --tor-port PORT                 Tor SOCKS5 port (default: 9050)
@@ -39,67 +42,67 @@ Optional Arguments:
   -v, --verbose                   Enable verbose logging
   -o, --output FILE               Save JSON results to file
   -h, --help                      Show help message
+```
 
-
-## DETECTION TECHNIQUES IMPLEMENTED (v7)
+## DETECTION TECHNIQUES IMPLEMENTED
 
 **✓ 1. CL.TE (Content-Length vs Transfer-Encoding)**
-    - Basic: Frontend sees CL, Backend sees TE
-    - With chunk extensions (0;x=y)
-    - Methodology: Send CL too short, expect TIMEOUT on backend
-    - Confirmation: Send correct CL, expect 200 OK
+- Basic: Frontend sees CL, Backend sees TE
+- With chunk extensions (0;x=y)
+- Methodology: Send CL too short, expect TIMEOUT on backend
+- Confirmation: Send correct CL, expect 200 OK
 
 **✓ 2. TE.CL (Transfer-Encoding vs Content-Length)**
-    - Basic: Frontend sees TE, Backend sees CL
-    - Space obfuscation (chunked + space)
-    - Tab obfuscation (chunked + tab)
-    - Methodology: Add extra data after chunked terminator
-    - Confirmation: Correct payload returns 200 OK
+- Basic: Frontend sees TE, Backend sees CL
+- Space obfuscation (chunked + space)
+- Tab obfuscation (chunked + tab)
+- Methodology: Add extra data after chunked terminator
+- Confirmation: Correct payload returns 200 OK
 
 **✓ 3. TE.TE (Transfer-Encoding Obfuscation)**
-    - Case mutations (transfer-encoding vs Transfer-Encoding)
-    - Space before value (TE:  chunked)
-    - Identity + chunked combinations
-    - Quoted values ("chunked")
-    - Methodology: Both parsers see TE but interpret differently
-    - Result: Can cause desync when parsers disagree on encoding
+- Case mutations (transfer-encoding vs Transfer-Encoding)
+- Space before value (TE:  chunked)
+- Identity + chunked combinations
+- Quoted values ("chunked")
+- Methodology: Both parsers see TE but interpret differently
+- Result: Can cause desync when parsers disagree on encoding
 
 **✓ 4. CL.CL (Duplicate Content-Length)**
-    - Two Content-Length headers with conflicting values
-    - Server picks first vs. last
-    - Methodology: Frontend uses value 1, Backend uses value 2
-    - Result: Body length mismatch causes desync
+- Two Content-Length headers with conflicting values
+- Server picks first vs. last
+- Methodology: Frontend uses value 1, Backend uses value 2
+- Result: Body length mismatch causes desync
 
 **✓ 5. Chunk Size Variants (TERM.EXT, EXT.TERM, ONE.TWO, TWO.ONE)**
-    - Line terminator parsing in chunk extensions/bodies
-    - Different length calculations
-    - Newline vs CRLF handling
-    - Methodology: Exploit difference in how parsers count bytes
-    - Result: Frontend reads less data than backend expects
+- Line terminator parsing in chunk extensions/bodies
+- Different length calculations
+- Newline vs CRLF handling
+- Methodology: Exploit difference in how parsers count bytes
+- Result: Frontend reads less data than backend expects
 
 **✓ 6. Hidden Headers (Parser Discrepancies)**
-    - Space before colon (Content-Length : 0)
-    - Line wrapping in headers (Content-Length:\r\n 0)
-    - Tab in header names
-    - Methodology: Hide headers from one parser but not the other
-    - Result: Different content forwarding
+- Space before colon (Content-Length : 0)
+- Line wrapping in headers (Content-Length:\r\n 0)
+- Tab in header names
+- Methodology: Hide headers from one parser but not the other
+- Result: Different content forwarding
 
 **✓ 7. Smuggled Requests (Cache Poisoning)**
-    - Inject crafted request into next request's body
-    - Detect via response reflection or status codes
-    - Methodology: Smuggle admin request
-    - Result: Cache/application confusion
+- Inject crafted request into next request's body
+- Detect via response reflection or status codes
+- Methodology: Smuggle admin request
+- Result: Cache/application confusion
 
 **✓ 8. Client-Side Desync (Browser attacks)**
-    - Connection state attacks
-    - Pause-based desync
-    - Methodology: Single request split into two responses
-    - Result: Browser handles malformed response
+- Connection state attacks
+- Pause-based desync
+- Methodology: Single request split into two responses
+- Result: Browser handles malformed response
 
 **✓ 9. HTTP/2 Variants**
-    - H2.TE: HTTP/2 request with TE header to HTTP/1.1 backend
-    - H2.CL: Content-Length confusion in HTTP/2
-    - Methodology: Leverage protocol version mismatch
+- H2.TE: HTTP/2 request with TE header to HTTP/1.1 backend
+- H2.CL: Content-Length confusion in HTTP/2
+- Methodology: Leverage protocol version mismatch
 
 
 ## DETECTION METHODOLOGY
@@ -107,24 +110,24 @@ Optional Arguments:
 For each technique, scanner performs:
 
 PHASE 1: BASELINE (Connectivity Test)
-  → Send normal, well-formed request
-  → Expected: 200 OK, quick response
-  → If TIMEOUT: Server unresponsive, skip
+- Send normal, well-formed request
+- Expected: 200 OK, quick response
+- If TIMEOUT: Server unresponsive, skip
 
 PHASE 2: ATTACK (Malformed Payload)
-  → Send crafted payload designed to cause desync
-  → Expected on vulnerable: TIMEOUT (backend waits for data)
-  → Expected on safe: 200 OK (both parsers agree)
+- Send crafted payload designed to cause desync
+- Expected on vulnerable: TIMEOUT (backend waits for data)
+- Expected on safe: 200 OK (both parsers agree)
 
 PHASE 3: CONFIRMATION (Repeat Attack)
-  → Re-send attack payload to confirm behavior is consistent
-  → Expected on vulnerable: TIMEOUT again
-  → Expected on safe: Either 200 OK or connection close
+- Re-send attack payload to confirm behavior is consistent
+- Expected on vulnerable: TIMEOUT again
+- Expected on safe: Either 200 OK or connection close
 
 PHASE 4: VALIDATION (Control Test)
-  → Send correct, complete payload
-  → Expected on all servers: 200 OK
-  → Confirms vulnerability is specific to malformed payload
+- Send correct, complete payload
+- Expected on all servers: 200 OK
+- Confirms vulnerability is specific to malformed payload
 
 
 ## INTERPRETING RESULTS
@@ -135,26 +138,26 @@ CONFIRMED VULNERABILITIES:
     [!!!] CL.TE-basic confirmed on retry
 
   What it means:
-    - Attack payload caused TIMEOUT
-    - Normal payload returned 200 OK
-    - Retry confirmed behavior is repeatable
-    - Server is vulnerable to request smuggling
+- Attack payload caused TIMEOUT
+- Normal payload returned 200 OK
+- Retry confirmed behavior is repeatable
+- Server is vulnerable to request smuggling
 
   What you can do:
-    1. Use Burp Suite HTTP Request Smuggler for exploitation
-    2. Test cache poisoning via request reflection
-    3. Attempt to access unauthorized resources (/admin)
-    4. Document the CDN/WAF/Framework being used
+1. Use Burp Suite HTTP Request Smuggler for exploitation
+2. Test cache poisoning via request reflection
+3. Attempt to access unauthorized resources (/admin)
+4. Document the CDN/WAF/Framework being used
 
 NOT VULNERABLE:
   Output shows:
     [+] CL.TE-basic: Safe
 
   What it means:
-    - Attack payload returned 200 OK (not timeout)
-    - Normal payload also returned 200 OK
-    - Server treats both as valid
-    - Likely uses compatible parsers
+- Attack payload returned 200 OK (not timeout)
+- Normal payload also returned 200 OK
+- Server treats both as valid
+- Likely uses compatible parsers
 
 
 ## EXAMPLE USAGE
@@ -253,10 +256,10 @@ $ cat results_target1.json
 ```
 
 **Why it works:**
-  - Frontend (with CL priority) reads first 4 bytes of body: "1\r\nZ"
-  - Backend (with TE priority) reads chunked: 1 byte "Z", then final chunk "0"
-  - Frontend sends only "1\r\nZ", backend waits for rest of chunked data
-  - Timeout occurs because backend is waiting for final chunk marker
+- Frontend (with CL priority) reads first 4 bytes of body: "1\r\nZ"
+- Backend (with TE priority) reads chunked: 1 byte "Z", then final chunk "0"
+- Frontend sends only "1\r\nZ", backend waits for rest of chunked data
+- Timeout occurs because backend is waiting for final chunk marker
 
 
 ### TE.CL BASIC:
@@ -282,10 +285,10 @@ Normal (CL correct):
 ```
 
 **Why it works:**
-  - Frontend (TE priority) reads chunked: "0" = final chunk, stops
-  - Backend (CL priority) expects 6 bytes but gets 5
-  - Backend waits for 6th byte "X" that was never sent in complete form
-  - Timeout occurs on backend
+- Frontend (TE priority) reads chunked: "0" = final chunk, stops
+- Backend (CL priority) expects 6 bytes but gets 5
+- Backend waits for 6th byte "X" that was never sent in complete form
+- Timeout occurs on backend
 
 
 
