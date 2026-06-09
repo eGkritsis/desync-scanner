@@ -348,7 +348,7 @@ class DesyncScanner:
         
         if baseline_timeout:
             log_err(f"BASELINE TEST FAILED: Target is not responding")
-            log_warn(f"The target did not respond to a basic GET request within 5 seconds.")
+            log_warn(f"The target did not respond to a basic GET request within 10 seconds.")
             log_warn(f"This could mean:")
             log_warn(f"  - Target is offline or unreachable")
             log_warn(f"  - Network connectivity issues")
