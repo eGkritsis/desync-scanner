@@ -1,0 +1,445 @@
+═══════════════════════════════════════════════════════════════════════════════
+HTTP REQUEST SMUGGLING - VISUAL DIAGRAMS
+═══════════════════════════════════════════════════════════════════════════════
+1. CL.TE VULNERABILITY - THE DESYNC FLOW
+═══════════════════════════════════════════════════════════════════════════════
+
+ATTACKER SENDS (One malformed request):
+┌────────────────────────────────────────────────────────────────────────────┐
+│ POST / HTTP/1.1                                                            │
+│ Host: target.com                                                           │
+│ Content-Length: 4                          ← Frontend uses this            │
+│ Transfer-Encoding: chunked                 ← Backend uses this             │
+│ Connection: keep-alive                                                     │
+│                                                                            │
+│ 1\r\nZ\r\n0\r\n\r\n                         ← Body: 11 bytes total         │
+│                                               (but CL says 4)              │
+└────────────────────────────────────────────────────────────────────────────┘
+
+
+FRONTEND (CDN/WAF) - CONTENT-LENGTH PARSER:
+┌──────────────────────────────────────────────────────────────────────
+│                                                                     │
+│  1. Read headers                                                    │
+│  2. See "Content-Length: 4"                                         │
+│  3. Read EXACTLY 4 bytes:                                           │
+│     Byte 1: "1"                                                     │
+│     Byte 2: "\r"                                                    │
+│     Byte 3: "\n"                                                    │
+│     Byte 4: "Z"                                                     │
+│  4. STOP (reached byte 4)                                           │
+│  5. Forward to backend: "POST / HTTP/1.1\r\n...\r\n\r\n1\r\nZ"      │
+│                                                                     │
+│  Ignored: "\r\n0\r\n\r\n" (never sent to backend)                   │
+└──────────────────────────────────────────────────────────────────────
+        │
+        │ (Incomplete request forwarded)
+        ▼
+
+
+BACKEND (Application Server) - TRANSFER-ENCODING PARSER:
+┌──────────────────────────────────────────────────────────────────────┐
+│                                                                      │
+│  1. Read headers                                                     │
+│  2. See "Transfer-Encoding: chunked"                                 │
+│  3. Parse chunked encoding:                                          │
+│     - Read "1" = chunk size (1 byte)                                 │
+│     - Read "\r\n" = delimiter                                        │
+│     - Read "Z" = 1 byte data                                         │
+│     - Read "\r\n" = delimiter                                        │
+│     - Look for "0\r\n\r\n" = final chunk                             │
+│     - BUT... didn't receive final chunk!                             │
+│                                                                      │
+│  4. WAITING for: "\r\n0\r\n\r\n"                                     │
+│  5. Timeout (data never arrives)                                     │
+│                                                                      │
+│  Result: TIMEOUT                                                     │
+└──────────────────────────────────────────────────────────────────────┘
+
+
+DETECTION: Attack timeout + Normal 200 = VULNERABLE
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+2. TE.CL VULNERABILITY - THE REVERSE DESYNC
+═══════════════════════════════════════════════════════════════════════════════
+
+ATTACKER SENDS:
+┌────────────────────────────────────────────────────────────────────────────┐
+│ POST / HTTP/1.1                                                            │
+│ Host: target.com                                                           │
+│ Transfer-Encoding: chunked                 ← Frontend uses this            │
+│ Content-Length: 6                          ← Backend uses this             │
+│ Connection: keep-alive                                                     │
+│                                                                            │
+│ 0\r\n\r\nX                                 ← Body: 5 bytes ("0\r\n\r\n")   │
+│                                               (but CL says 6)              │
+└────────────────────────────────────────────────────────────────────────────┘
+
+
+FRONTEND - TRANSFER-ENCODING PARSER:
+┌──────────────────────────────────────────────────────────────────────┐
+│  1. See "Transfer-Encoding: chunked"                                 │
+│  2. Parse chunked:                                                   │
+│     - Read "0" = final chunk (0 bytes data)                          │
+│     - Read "\r\n" = delimiter                                        │
+│     - Read "\r\n" = end of body                                      │
+│  3. Chunked body complete                                            │
+│  4. STOP reading                                                     │
+│  5. Forward: "POST / HTTP/1.1\r\n...\r\n\r\n0\r\n\r\n"               │
+│                                                                      │
+│  Ignored: "X" (comes after TE end)                                   │
+└──────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+
+
+BACKEND - CONTENT-LENGTH PARSER:
+┌──────────────────────────────────────────────────────────────────────┐
+│  1. See "Content-Length: 6"                                          │
+│  2. Expect EXACTLY 6 bytes                                           │
+│  3. Received:                                                        │
+│     "0\r\n\r\n" = 5 bytes                                            │
+│     Missing: 1 more byte!                                            │
+│  4. WAITING for 6th byte                                             │
+│  5. Timeout                                                          │
+│                                                                      │
+│  Result: TIMEOUT                                                     │
+└──────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+3. HOW SMUGGLING WORKS - REQUEST QUEUE POISONING
+═══════════════════════════════════════════════════════════════════════════════
+
+Scenario: Load balanced backend with connection reuse
+
+REQUEST 1 (from attacker - CL.TE vulnerable):
+┌─────────────────────────────────────────────────────────────┐
+│ POST /login HTTP/1.1                  ← Frontend sees this  │
+│ Host: target.com                                            │
+│ Content-Length: 100                                         │
+│ Transfer-Encoding: chunked                                  │
+│                                                             │
+│ [12 bytes of body]                                          │
+│ GET /admin HTTP/1.1                   ← Backend sees this   │
+│ Host: target.com                      (smuggled!)           │
+│ [rest]                                                      │
+└─────────────────────────────────────────────────────────────┘
+
+
+Frontend processes:
+  /login request ✓
+  Forwards to backend-server-1
+
+Backend processes:
+  /login request ✓ (returns: "Login successful")
+  But body had extra data...
+  Suddenly receives: GET /admin HTTP/1.1
+
+Backend thinks:
+  "A new request arrived on this connection!"
+
+Backend processes:
+  /admin request (using same connection, same session!)
+  Returns: Admin page content
+
+
+ATTACKER GETS:
+  Admin access using victim's session!
+
+
+═══════════════════════════════════════════════════════════════════════════════
+4. HEADER DISAGREEMENT DIAGRAM
+═══════════════════════════════════════════════════════════════════════════════
+
+SCENARIO: Hidden header (space before colon)
+
+PAYLOAD:
+  Content-Length : 0   ← Space before colon
+
+FRONTEND (Strict):
+  "Content-Length : 0"
+        ↓
+  "Header name contains space?"
+        ↓
+  "This is INVALID syntax!"
+        ↓
+  SKIP THIS HEADER
+        ↓
+  "No Content-Length found"
+        ↓
+  Body length = UNKNOWN
+        ↓
+  Wait for connection close or more data
+        ↓
+  TIMEOUT (waiting for more)
+
+BACKEND (Lenient):
+  "Content-Length : 0"
+        ↓
+  "Space is okay, it's whitespace"
+        ↓
+  ACCEPT THIS HEADER
+        ↓
+  "Content-Length = 0"
+        ↓
+  Body length = 0 bytes
+        ↓
+  Read 0 bytes (body is empty)
+        ↓
+  Request complete
+        ↓
+  200 OK
+
+
+═══════════════════════════════════════════════════════════════════════════════
+5. DUPLICATE CONTENT-LENGTH DISAGREEMENT
+═══════════════════════════════════════════════════════════════════════════════
+
+PAYLOAD:
+  Content-Length: 3
+  Content-Length: 12
+
+FRONTEND:
+  "Two Content-Length headers found"
+        ↓
+  "Use FIRST value (most common implementation)"
+        ↓
+  Content-Length = 3
+        ↓
+  Read 3 bytes: "X=1"
+        ↓
+  STOP
+        ↓
+  Forward incomplete request
+        ↓
+  (3 bytes sent, 12 expected)
+
+BACKEND:
+  "Two Content-Length headers found"
+        ↓
+  "Use LAST value (implementation A)"
+        ↓
+  Content-Length = 12
+        ↓
+  Received: 8 bytes ("X=1\r\n\r\n")
+        ↓
+  Missing: 4 bytes
+        ↓
+  TIMEOUT
+
+
+═══════════════════════════════════════════════════════════════════════════════
+6. BYTE-BY-BYTE BREAKDOWN: CL.TE BASIC
+═══════════════════════════════════════════════════════════════════════════════
+
+Complete Attack Payload:
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Byte   Hex    ASCII   What is it?                  Frontend  Backend    │
+│ ────────────────────────────────────────────────────────────────────────│
+│ 1-3    50 4F 53  "POS"   Start of request         Read      Read        │
+│ 4-6    54 20 2F  "T /"   ...                      Read      Read        │
+│ ...                      Headers (skipped for brevity)                  │
+│        ...       ...     "Content-Length: 4"      Read      Read        │
+│        ...       ...     "Transfer-Encoding..."   Read      Read        │
+│        ...       ...     "\r\n\r\n" (end headers) Read      Read        │
+│ ────────────────────────────────────────────────────────────────────────│
+│ BODY START                                                              │
+│ ────────────────────────────────────────────────────────────────────────│
+│ 1      31      "1"     Byte 1 of CL body         Read      Read         │
+│ 2      0D      "\r"    Byte 2 of CL body         Read      Read         │
+│ 3      0A      "\n"    Byte 3 of CL body         Read      Read         │
+│ 4      5A      "Z"     Byte 4 of CL body         Read      Read         │
+│ ────────────────────────────────────────────────────────────────────────│
+│ 5      0D      "\r"    Part of chunked encoding  NOT Read  Read         │
+│ 6      0A      "\n"    Part of chunked encoding  NOT Read  Read         │
+│ 7      30      "0"     Final chunk size byte     NOT Read  Read         │
+│ 8      0D      "\r"    Delimiter                 NOT Read  Read         │
+│ 9      0A      "\n"    Delimiter                 NOT Read  Read         │
+│ 10     0D      "\r"    End of body marker        NOT Read  Read         │
+│ 11     0A      "\n"    End of body marker        NOT Read  Read         │
+│ ────────────────────────────────────────────────────────────────────────│
+│ Total: 11 bytes                                                         │
+│ Frontend reads: 4 bytes (stops)                                         │
+│ Backend reads: 4 bytes, then waits for bytes 5-11                       │
+│ Backend timeout: never received bytes 5-11                              │
+└──────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+7. REQUEST SMUGGLING ATTACK CHAIN
+═══════════════════════════════════════════════════════════════════════════════
+
+Step 1: Reconnaissance
+┌─────────────────────────────────────────────────────────────────────┐
+│ Attacker runs scanner: desync_scanner.py                            │
+│ Result: Server is vulnerable to CL.TE                               │
+│ Impact: Now we know how to exploit                                  │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 2: Craft Smuggled Request
+┌─────────────────────────────────────────────────────────────────────┐
+│ POST / HTTP/1.1                                                    │
+│ Host: target.com                                                   │
+│ Content-Length: 50                                                 │
+│ Transfer-Encoding: chunked                                         │
+│                                                                    │
+│ [Legitimate request data - 46 bytes]                               │
+│ GET /admin HTTP/1.1                                                │
+│ Host: target.com                                                   │
+│ [closing TE markers]                                               │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 3: Send Malformed Request
+┌─────────────────────────────────────────────────────────────────────┐
+│ Frontend:                    Backend:                               │
+│ Reads 50 bytes CL       →    Parses TE                              │
+│ Sends incomplete        →    Receives incomplete                    │
+│ But body includes...    →    Sees /admin request                    │
+│                              Processes it!                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 4: Exploit Results
+┌─────────────────────────────────────────────────────────────────────┐
+│ Backend processes smuggled request without checking auth            │
+│ Attacker gains unauthorized access                                  │
+│ Cache may be poisoned for all users                                 │
+│ Session may be hijacked                                             │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+8. NORMAL REQUEST vs SMUGGLED REQUEST
+═══════════════════════════════════════════════════════════════════════════════
+
+NORMAL REQUEST (Both parsers agree):
+┌──────────────────────────────────────────────────────────────────────┐
+│ POST / HTTP/1.1                                                      │
+│ Content-Length: 11                                                   │
+│ Transfer-Encoding: chunked                                           │
+│                                                                      │
+│ 1\r\nZ\r\n0\r\n\r\n                                                  │
+│ (exactly 11 bytes - CL and TE agree)                                 │
+│                                                                      │
+│ Frontend:  Reads 11 bytes ✓  →  Sends 11 bytes                       │
+│ Backend:   Reads TE, parses complete ✓  →  200 OK                    │
+│                                                                      │
+│ Result: Both parsers happy, no desync                                │
+└──────────────────────────────────────────────────────────────────────┘
+
+
+SMUGGLED REQUEST (Parsers disagree):
+┌──────────────────────────────────────────────────────────────────────┐
+│ POST / HTTP/1.1                                                      │
+│ Content-Length: 4                 ← Frontend uses this               │
+│ Transfer-Encoding: chunked        ← Backend uses this                │
+│                                                                      │
+│ 1\r\nZ\r\n0\r\n\r\n              (11 bytes total)                    │
+│ GET /admin HTTP/1.1               ← Smuggled request                 │
+│ [...]                                                                │
+│                                                                      │
+│ Frontend:  Reads 4 bytes ✓  →  Sends 4 bytes                         │
+│ Backend:   Reads TE, expects final chunk in next 7 bytes             │
+│            Gets /admin request instead!  →  Processes /admin         │
+│                                                                      │
+│ Result: Parsers disagreed, /admin request was smuggled!              │
+└──────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+9. WHY TIMEOUT = VULNERABILITY
+═══════════════════════════════════════════════════════════════════════════════
+
+When Attack Payload causes TIMEOUT:
+
+Timeline:
+┌──────────────────────────────────────────────────────────────────┐
+│ T=0s   Frontend receives malformed request                       │
+│ T=0.1s Frontend forwards (incomplete) to backend                 │
+│ T=0.2s Backend receives incomplete data                          │
+│ T=0.3s Backend waits for missing data                            │
+│ T=1.0s Backend still waiting...                                  │
+│ T=2.0s Backend still waiting...                                  │
+│ T=3.0s Backend still waiting...                                  │
+│ T=4.0s Backend still waiting...                                  │
+│ T=5.0s REQUEST TIMEOUT (no response after 5 seconds)             │
+│                                                                  │
+│ Why timeout?                                                     │
+│ ───────────────                                                  │
+│ Backend is stuck parsing TE, waiting for final chunk marker      │
+│ Frontend already finished and isn't sending more                 │
+│ Connection is "open" but no data flows                           │
+│ Backend socket times out (typically 5-30 seconds)                │
+│                                                                  │
+│ This timeout is PROOF:                                           │
+│  - Frontend and backend parsed differently                       │
+│  - Frontend finished, backend didn't                             │
+│  - They have different expectations about body length            │
+│  - = HTTP REQUEST SMUGGLING VULNERABILITY                        │
+└──────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+10. NORMAL RESPONSE (Control test)
+═══════════════════════════════════════════════════════════════════════════════
+
+When Normal Payload returns 200 OK:
+
+Timeline:
+┌──────────────────────────────────────────────────────────────────┐
+│ T=0s   Frontend receives proper request                          │
+│ T=0.1s Frontend parses: CL=11, reads 11 bytes                    │
+│ T=0.2s Frontend forwards complete body to backend                │
+│ T=0.3s Backend receives complete data                            │
+│ T=0.4s Backend parses TE: reads "1\r\nZ\r\n0\r\n\r\n"            │
+│ T=0.5s Backend: "Chunked encoding complete!"                     │
+│ T=0.6s Backend processes request normally                        │
+│ T=0.7s Backend sends: 200 OK response                            │
+│ T=0.8s Frontend receives: 200 OK                                 │
+│                                                                  │
+│ Why 200 OK?                                                      │
+│ ───────────                                                      │
+│ CL and TE values were consistent                                 │
+│ Both parsers saw same body boundary                              │
+│ Request was processed normally                                   │
+│ No desync occurred                                               │
+│                                                                  │
+│ This 200 OK is PROOF:                                            │
+│  - When values agree, both parsers process same request          │
+│  - The timeout on attack was due to disagreement                 │
+│  - Not a random network issue                                    │
+│  - = Confirms desync vulnerability                               │
+└──────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+
+11. COMPARISON: ALL VULNERABILITY TYPES
+═══════════════════════════════════════════════════════════════════════════════
+
+                   CL.TE         TE.CL         TE.TE         CL.CL      Hidden
+                   ─────         ─────         ─────         ─────      ──────
+
+Frontend Priority  CL            TE            Varies        First       Accepts
+Backend Priority   TE            CL            Varies        Last        Rejects
+
+Disagreement      Content-      Content-      Encoding      Content-    Header
+Type               Length        Length        format        Length      parsing
+
+Attack Payload    CL short      TE ends       TE obfus      2x CL       Space in
+                  TE long       CL long       cated         different   header
+
+Result            Backend       Backend       Backend       Backend     Backend
+                  waits for     waits for     waits for     waits for   waits for
+                  TE ending     more bytes    correct enc   body end    unknown
+
+Detection         TIMEOUT       TIMEOUT       TIMEOUT       TIMEOUT     TIMEOUT
+
+Exploitation      Smuggle GET   Smuggle GET   Smuggle GET   Smuggle GET Smuggle
+                  behind CL     behind TE     behind TE     behind CL   requests
+
+
+═══════════════════════════════════════════════════════════════════════════════
